@@ -35,7 +35,10 @@ $gDryRun=0;
 //$gDryRun=1;
 $gWaitForKey=0;
 $gYOffset=10; // make it move a bit "upwards"
-
+$gHandbrake=0.0;
+$gWaitForPenUp=0.5;
+$gWaitForPenDown=3.0;
+$gPenPosition='unknown';
 
 /* Get Arguments or use hardecoded path to HPGL-file */
 if ($argc==2)
@@ -87,6 +90,42 @@ $gMinStepsPerMove=3; // only used with custom DPI
 //$gStepsPer
 #exit();
 
+/* Initialize penCLI.py */
+$descriptorspec = array(
+   0 => array("pipe", "r"),  // stdin is a pipe that the child will read from
+   1 => STDOUT,  // stdout is a pipe that the child will write to
+#   1 => array("pipe", "w"),  // stdout is a pipe that the child will write to
+#   2 => null,
+);
+$penCLIProcess = proc_open('python penCLI.py', $descriptorspec, $pipes);
+if (is_resource($penCLIProcess))
+{
+    // $pipes now looks like this:
+    // 0 => writeable handle connected to child stdin
+    // 1 => readable handle connected to child stdout
+    fwrite($pipes[0], "open\n");
+	$gPenPosition='up';
+	if (42==23) // deb
+	{
+		sleep(1);
+    		fwrite($pipes[0], "down\n");
+		sleep(1);
+    		fwrite($pipes[0], "up\n");
+		sleep(1);
+    		fwrite($pipes[0], "down\n");
+		sleep(1);
+    		fwrite($pipes[0], "up\n");
+		sleep(1);
+		exit(1);
+	}
+}
+else
+{
+	echo("Init of penCLI.py failed.");
+	exit(1);
+}
+#exit(1);
+
 /* Explode commands */
 $hpglCommandsArray=explode(";", $gHpglString);
 print_r($hpglCommandsArray);
@@ -120,6 +159,7 @@ foreach($hpglCommandsArray as $hpglCommand)
 	
 	$hpglCommandID++;
 	$hpglLastCommand=$hpglCommand;
+	sleep($gHandbrake);
 }
 
 
@@ -135,11 +175,19 @@ if (42==23)
 /* Disable Steppers */
 if (!$gDryRun) system("python Disable.py");
 
+/* Close pipe filehandles (penCLI.py) */
+fwrite($pipes[0], "quit\n");
+fclose($pipes[0]);
+fclose($pipes[1]);
+// It is important that you close any pipes before calling
+// proc_close in order to avoid a deadlock
+proc_close($penCLIProcess);
+
 
 /* HERE BE DRAGONS */
 function penDown($aHpglCommand, $aHpglLastCommand)
 {
-	global $gDryRun;
+	global $gDryRun, $pipes, $gWaitForPenDown, $gPenPosition;
 
 	echo("Pen down, move to: $aHpglCommand\n");
 	$lCoordinates=explode(",", $aHpglCommand);
@@ -155,7 +203,22 @@ function penDown($aHpglCommand, $aHpglLastCommand)
 	}
 
 	# PEN DOWN
-	if (!$gDryRun) system("python penDown.py");
+	if (!$gDryRun)
+	{
+		if (42==42)
+		{
+			if ($gPenPosition!='down')
+			{
+				fwrite($pipes[0], "down\n");
+				sleep($gWaitForPenDown);
+				$gPenPosition='down';
+			}
+		}
+		else
+		{
+			system("python penDown.py");
+		}
+	}
 	
 	/* Now, move the pen */
 	echo("Coordinate-pairs: " . count($lCoordinates) . "\n");
@@ -167,11 +230,26 @@ function penDown($aHpglCommand, $aHpglLastCommand)
 
 function penUp($aHpglCommand)
 {
-	global $gDryRun;
+	global $gDryRun, $pipes, $gWaitForPenUp, $gPenPosition;
 	
 	# Pen Up
-	if (!$gDryRun) system("python penUp.py");
-
+	if (!$gDryRun)
+	{
+		if (42==42)
+		{
+			if ($gPenPosition!='up')
+			{
+				fwrite($pipes[0], "up\n");
+				sleep($gWaitForPenUp);
+				$gPenPosition='up';
+			}
+		}
+		else
+		{
+			system("python penUp.py");
+		}
+	}
+	
 	if (strlen($aHpglCommand))
 	{
 		echo("Pen up, move to: $aHpglCommand\n");
